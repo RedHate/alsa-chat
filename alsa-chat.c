@@ -38,7 +38,7 @@
 #define CHANNELS    1
 #define FRAME_SIZE  8
 #define FORMAT      SND_PCM_FORMAT_S8
-#define TYPE		uint8_t
+#define TYPE		char
 
 // Global ALSA handles
 snd_pcm_t *capture_handle;
@@ -54,7 +54,7 @@ int micon = 0;
 #define KEY_ARRAY    4
 
 // XOR keys
-unsigned char keys[KEY_ARRAY][XOR_KEY_LEN] = { 
+uint8_t keys[KEY_ARRAY][XOR_KEY_LEN] = { 
 	{ 0xec, 0x1d, 0x53, 0xdf, 0xc3, 0x23, 0x28, 0xfa, 0xe0, 0xfe, 0x95, 0xc9, 0x51, 0x2a, 0x65, 0x63, 0xe6, 0xb4, 0xf9, 0x3a },
 	{ 0x67, 0x10, 0xca, 0x9c, 0x54, 0x66, 0x13, 0xb8, 0x50, 0x67, 0x05, 0x99, 0xa0, 0xaa, 0x53, 0x16, 0xec, 0x5e, 0xcc, 0x3c },
 	{ 0x04, 0xf0, 0x24, 0x97, 0x37, 0x23, 0x05, 0x7b, 0x06, 0xe7, 0x0d, 0x48, 0xf2, 0x41, 0x6b, 0xca, 0x55, 0xad, 0x9f, 0xf6 },
@@ -77,7 +77,7 @@ void print_keys() {
 }
 
 // XOR the keyset with a passphrase
-void xor_keys(unsigned char keys[KEY_ARRAY][XOR_KEY_LEN], const char *password){
+void xor_keys(uint8_t keys[KEY_ARRAY][XOR_KEY_LEN], const char *password){
 	// Set key position to 0
 	int keypos = 0;
 	// Loop through the keys
@@ -86,7 +86,7 @@ void xor_keys(unsigned char keys[KEY_ARRAY][XOR_KEY_LEN], const char *password){
 		// Loop through selected key
 		for (j = 0; j < XOR_KEY_LEN; j++) {
 			// XOR the key
-			keys[i][j] = (unsigned char)((unsigned char)password[keypos] ^ (unsigned char)keys[i][j]);
+			keys[i][j] = (uint8_t)((uint8_t)password[keypos] ^ (uint8_t)keys[i][j]);
 			// Move the key position
 			keypos++;
 			// If the key position is greater than the key length reset it
@@ -96,16 +96,16 @@ void xor_keys(unsigned char keys[KEY_ARRAY][XOR_KEY_LEN], const char *password){
 }
 
 // Directional XOR fnc (doesn't need to be global, even if that's how you think it should be done. i scope my code.)
-void xor_directional(unsigned char *buffer, unsigned int size, unsigned char *key, int direction) {
+void xor_directional(uint8_t *buffer, uint32_t size, uint8_t *key, int direction) {
 	// Used for xor position
 	int keypos = 0;
 	// XOR forward / backward
 	if (direction == XOR_FORWARD) {
 		// Lazy XOR
-		unsigned int i;
+		uint32_t i;
 		for (i = 0; i < size; i++) {
 			// XOR shift the data according to the key and its relative read position
-			buffer[i] = (unsigned char)((unsigned char)key[keypos] ^ (unsigned char)buffer[i]);
+			buffer[i] = (uint8_t)((uint8_t)key[keypos] ^ (uint8_t)buffer[i]);
 			// Move the key position
 			keypos++;
 			// If the key position is greater than the key length reset it
@@ -114,10 +114,10 @@ void xor_directional(unsigned char *buffer, unsigned int size, unsigned char *ke
 	}
 	else if (direction == XOR_BACKWARD) {
 		// Lazy XOR
-		unsigned int i;
+		uint32_t i;
 		for (i = size; i > 0; i--) {
 			// XOR shift the data according to the key and its relative read position
-			buffer[i] = (unsigned char)((unsigned char)key[keypos] ^ (unsigned char)buffer[i]);
+			buffer[i] = (uint8_t)((uint8_t)key[keypos] ^ (uint8_t)buffer[i]);
 			// Move the key position
 			keypos++;
 			// If the key position is greater than the key length reset it
@@ -127,7 +127,7 @@ void xor_directional(unsigned char *buffer, unsigned int size, unsigned char *ke
 }
 
 // Should suffice with a random key
-void xor4x(unsigned char *buffer, unsigned int size) {
+void xor4x(uint8_t *buffer, uint32_t size) {
 	// Set the direction to 0
 	int direction = 0;
 	// loop through keys
@@ -182,7 +182,7 @@ int spacebar_pressed() {
 }
 
 // Initialize ALSA for capture or playback
-int init_alsa(snd_pcm_t **handle, const char *device, snd_pcm_stream_t stream, unsigned int channels) {
+int init_alsa(snd_pcm_t **handle, const char *device, snd_pcm_stream_t stream, uint32_t channels) {
     
     // Local vars
     int err;
@@ -205,7 +205,7 @@ int init_alsa(snd_pcm_t **handle, const char *device, snd_pcm_stream_t stream, u
 	
 	// (ignore that gcc throws warning on this or fix it lol)
 	// set resample since we want to adjust the rate 
-	unsigned int resample = 1;
+	uint32_t resample = 1;
     if ((err = snd_pcm_hw_params_set_rate_resample(*handle, params, &resample)) < 0) {
         //fprintf(stderr, "ALSA snd_pcm_hw_params_set_rate_resample error: %s\n", snd_strerror(err));
 		return err;
@@ -225,7 +225,7 @@ int init_alsa(snd_pcm_t **handle, const char *device, snd_pcm_stream_t stream, u
     snd_pcm_hw_params_set_channels(*handle, params, channels);
     
 	// Set rate
-	unsigned int sample_rate = SAMPLE_RATE;
+	uint32_t sample_rate = SAMPLE_RATE;
     if ((err = snd_pcm_hw_params_set_rate_near(*handle, params, &sample_rate, 0)) < 0) {
         fprintf(stderr, "ALSA snd_pcm_hw_params_set_rate error: %s\n", snd_strerror(err));
 		return err;
@@ -259,7 +259,7 @@ void* receive_play_audio(void* arg) {
 		ssize_t r = recv(sockfd, buffer, sizeof(buffer), 0);
 		if (r > 0){
 			// Apply XOR
-			xor4x((unsigned char*)buffer, sizeof(buffer));
+			xor4x((uint8_t*)buffer, sizeof(buffer));
 			// Write buffer to playback handle
 			snd_pcm_writei(playback_handle, buffer, r);
 			// Debug
@@ -285,7 +285,7 @@ void* capture_send_audio(void* arg) {
 			// Is the mic on?
 			if(micon == 1){
 				// Apply XOR
-				xor4x((unsigned char*)buffer, sizeof(buffer));
+				xor4x((uint8_t*)buffer, sizeof(buffer));
 				// Send to sock
 				r = send(sockfd, buffer, sizeof(buffer),0);
 				// Debug
