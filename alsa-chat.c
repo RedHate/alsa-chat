@@ -6,10 +6,25 @@
  * An organically grown way of how not to create voice chat.
  * 
  * TCP, 8Bit, 31kbps, Stream masking with xor, Spacebar toggle
+ * 60 second key up time out
  * 
- * c99 compliant (-to be seen)
+ * c99 compliant
  * 
- * Use plug devices! Like so: plug:hw:1 rather than hw:1
+ * 
+ * **NOTE**
+ * 
+ *   you may encounter an issue with there being a douplicate time
+ * definition in one of your alsa headers, alsa/config.h iirc. Comment
+ * it out of that header. You have "time.h" in c99.
+ * 
+ *   Also may complain about implicit declaration of nano sleep. -It
+ * works on my end so test it before replacing it with some crap like 
+ * sleep();
+ * 
+ * 
+ * Use plug devices! 
+ * 			
+ * 		Like so: plug:hw:1 rather than hw:1
  * 
  * 
  *                               -Ultros was here in 2026
@@ -40,18 +55,21 @@
 #define FORMAT      SND_PCM_FORMAT_S8
 #define TYPE		char
 
+
+// Microphone time out
+#define MIC_TIMEOUT_SECONDS 60
+int key_up = 0;
+time_t key_up_start;
+
 // Global ALSA handles
 snd_pcm_t *capture_handle;
 snd_pcm_t *playback_handle;
-
-// Mic gain
-int micon = 0;
 
 // XOR related definitions
 #define XOR_KEY_LEN  20
 #define XOR_FORWARD  0
 #define XOR_BACKWARD 1
-#define KEY_ARRAY    4
+#define KEY_ARRAY    8
 
 // XOR keys
 uint8_t keys[KEY_ARRAY][XOR_KEY_LEN] = { 
@@ -59,13 +77,17 @@ uint8_t keys[KEY_ARRAY][XOR_KEY_LEN] = {
 	{ 0x67, 0x10, 0xca, 0x9c, 0x54, 0x66, 0x13, 0xb8, 0x50, 0x67, 0x05, 0x99, 0xa0, 0xaa, 0x53, 0x16, 0xec, 0x5e, 0xcc, 0x3c },
 	{ 0x04, 0xf0, 0x24, 0x97, 0x37, 0x23, 0x05, 0x7b, 0x06, 0xe7, 0x0d, 0x48, 0xf2, 0x41, 0x6b, 0xca, 0x55, 0xad, 0x9f, 0xf6 },
 	{ 0x87, 0xe9, 0x0a, 0x8c, 0xae, 0x4e, 0x5c, 0xb3, 0xa9, 0x25, 0x7e, 0xa5, 0x34, 0x36, 0x91, 0xf3, 0xdd, 0x1e, 0x1c, 0xc8 },
+	{ 0x6d, 0xce, 0xab, 0x28, 0xc7, 0x37, 0xea, 0x60, 0x39, 0x59, 0x55, 0x57, 0xb8, 0x75, 0xce, 0x35, 0x0a, 0x9e, 0x21, 0x46 },
+	{ 0x4a, 0x38, 0x9b, 0x49, 0x07, 0xae, 0x20, 0x28, 0x62, 0x85, 0x03, 0x40, 0xc0, 0x72, 0xfa, 0x36, 0x05, 0xe6, 0x97, 0xeb },
+	{ 0x86, 0x51, 0xfa, 0xf7, 0xdb, 0xdd, 0xd4, 0x72, 0xbc, 0xe8, 0x11, 0x10, 0x93, 0x63, 0x68, 0x70, 0x3c, 0xb0, 0xec, 0x69 },
+	{ 0x6d, 0xce, 0xab, 0x28, 0xc7, 0x37, 0xea, 0x60, 0x39, 0x59, 0x55, 0x57, 0xb8, 0x75, 0xce, 0x35, 0x0a, 0x9e, 0x21, 0x46 },
 };
 
 // Print the key info
 void print_keys() {
 	// Loop through the keys
 	int i, j;
-	for (i = 0; i < KEY_ARRAY; i++) {
+	for (i = 0; i < KEY_ARRAY-1; i++) {
 		// Loop through key length
 		for (j = 0; j < XOR_KEY_LEN; j++) {
 			// print the bytes
@@ -82,7 +104,20 @@ void xor_keys(uint8_t keys[KEY_ARRAY][XOR_KEY_LEN], const char *password){
 	int keypos = 0;
 	// Loop through the keys
 	int i, j;
-	for (i = 0; i < KEY_ARRAY; i++) {
+	// positive
+	for (i = 0; i < KEY_ARRAY-1; i++) {
+		// Loop through selected key
+		for (j = 0; j < XOR_KEY_LEN; j++) {
+			// XOR the key
+			keys[i][j] = (uint8_t)((uint8_t)password[keypos] ^ (uint8_t)keys[i][j]);
+			// Move the key position
+			keypos++;
+			// If the key position is greater than the key length reset it
+			if (keypos == strlen(password)) keypos = 0;
+		}
+	}
+	// negative
+	for (i = KEY_ARRAY-1; i > 0; i--) {
 		// Loop through selected key
 		for (j = 0; j < XOR_KEY_LEN; j++) {
 			// XOR the key
@@ -132,7 +167,19 @@ void xor4x(uint8_t *buffer, uint32_t size) {
 	int direction = 0;
 	// loop through keys
 	int i;
-	for (i = 0; i < 3; i++) {
+	// positive
+	for (i = 0; i < KEY_ARRAY-1; i++) {
+		// odds
+		if (i & 1)
+			direction = XOR_FORWARD;
+		// evens
+		if (!(i & 1))
+			direction = XOR_BACKWARD;
+		//xor it in a direction
+		xor_directional(buffer, size, keys[i], direction);
+	}
+	// Negative
+	for (i = KEY_ARRAY-1; i > 0; i--) {
 		// odds
 		if (i & 1)
 			direction = XOR_FORWARD;
@@ -206,7 +253,7 @@ int init_alsa(snd_pcm_t **handle, const char *device, snd_pcm_stream_t stream, u
 	// (ignore that gcc throws warning on this or fix it lol)
 	// set resample since we want to adjust the rate 
 	uint32_t resample = 1;
-    if ((err = snd_pcm_hw_params_set_rate_resample(*handle, params, &resample)) < 0) {
+    if ((err = snd_pcm_hw_params_set_rate_resample(*handle, params, *(unsigned int*)&resample)) < 0) {
         //fprintf(stderr, "ALSA snd_pcm_hw_params_set_rate_resample error: %s\n", snd_strerror(err));
 		return err;
 	}
@@ -272,10 +319,12 @@ void* receive_play_audio(void* arg) {
 }
 
 void* capture_send_audio(void* arg) {
+	
 	// Get the socket fd
     int sockfd = *(int*)arg;
     // Create a buffer for audio
     TYPE buffer[FRAME_SIZE*CHANNELS];
+    
     // Send some data
     while (1) {
 		// This needs to stay reading
@@ -283,13 +332,19 @@ void* capture_send_audio(void* arg) {
 		ssize_t r = snd_pcm_readi(capture_handle, buffer, sizeof(buffer));
 		if (r > 0){
 			// Is the mic on?
-			if(micon == 1){
-				// Apply XOR
-				xor4x((uint8_t*)buffer, sizeof(buffer));
-				// Send to sock
-				r = send(sockfd, buffer, sizeof(buffer),0);
-				// Debug
-				printf("Send) %ld\n", r);
+			if(key_up == 1){
+				if((time(NULL)-key_up_start) < MIC_TIMEOUT_SECONDS){
+					// Apply XOR
+					xor4x((uint8_t*)buffer, sizeof(buffer));
+					// Send to sock
+					r = send(sockfd, buffer, sizeof(buffer),0);
+					// Debug
+					printf("Send) %ld\n", r);
+				}
+				else{
+					key_up = 0;
+					printf("mic off\n");
+				}
 			}
 		}
     }
@@ -398,15 +453,17 @@ int client(int argc, char *argv[]) {
 				// Has spacebar been pressed?
 				if (spacebar_pressed()) {
 					//Enable / disable the mic
-					if(!micon){
+					if(!key_up){
 						// Mic on!
-						micon = 1;
+						key_up = 1;
+						// Start the timer
+						key_up_start = time(NULL);
 						// Debug
 						printf("mic on\n");
 					} 
 					else {
 						// Mic off!
-						micon = 0;
+						key_up = 0;
 						// Debug
 						printf("mic off\n");
 					}
@@ -694,5 +751,4 @@ int main(int argc, char *argv[]) {
     return 0;
     
 }
-
 
