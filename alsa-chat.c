@@ -9,7 +9,7 @@
  * 
  * c99 compliant (-to be seen)
  * 
- * Use plug devices! Like so: plug:hw:1 rather that hw:1
+ * Use plug devices! Like so: plug:hw:1 rather than hw:1
  * 
  * 
  *                               -Ultros was here in 2026
@@ -694,4 +694,5 @@ int main(int argc, char *argv[]) {
     return 0;
     
 }
+
 
