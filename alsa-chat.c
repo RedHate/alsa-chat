@@ -28,7 +28,7 @@
  * 
  * 
  *                               -Ultros was here in 2026
- 
+ * 
  */
 
 // Uncomment to enable debugging // comment to turn off
@@ -51,13 +51,14 @@
 #define FORMAT      SND_PCM_FORMAT_S8
 #define TYPE		char
 
-int running = 1;
-
 // Microphone time out
 #define MIC_TIMEOUT_SECONDS 60
 int key_up = 0;
 time_t key_up_start;
 float mic_gain = 1.0f;
+
+// Var for shutdown
+int running = 1;
 
 // Global ALSA handles
 snd_pcm_t *capture_handle;
@@ -208,7 +209,7 @@ void byte_swap(uint8_t *in, uint32_t size){
 }
 
 // This may give an implicit declatation warning, but it seems to be functional try 1000000 as param
-void sleep_us(long microseconds){
+void sleep_us(long microseconds) {
 	// Local var
 	struct timespec ts;
 	// Set time granularity to the microsecond
@@ -218,20 +219,26 @@ void sleep_us(long microseconds){
 	nanosleep(&ts, NULL);
 }
 
+// Local Var
+struct termios term;
+
+void restore_terminal(void) {
+	tcsetattr(STDIN_FILENO,TCSANOW,&term);
+}
+
 // Set terminal to non-blocking input
 void enable_nonblocking_input() {
-	// Local Var
-    struct termios t;
     // Get attributes
-    tcgetattr(STDIN_FILENO, &t);
+    tcgetattr(STDIN_FILENO, &term);
+    // Set exit
+    atexit(restore_terminal);
     // Set Flags
-    t.c_lflag &= ~(ICANON | ECHO); // raw input
+    term.c_lflag &= ~(ICANON | ECHO); // raw input
     // Set attributes
-    tcsetattr(STDIN_FILENO, TCSANOW, &t);
+    tcsetattr(STDIN_FILENO, TCSANOW, &term);
     // Set stdin to non blocking
     fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK);
 }
-
 
 // Initialize ALSA for capture or playback
 int init_alsa(snd_pcm_t **handle, const char *device, snd_pcm_stream_t stream, uint32_t channels) {
@@ -299,7 +306,7 @@ int init_alsa(snd_pcm_t **handle, const char *device, snd_pcm_stream_t stream, u
     
 }
 
-// Thread for sending audio
+// Thread for receiving audio and playing
 void* receive_play_audio(void* arg) {
 	// Get the socket fd
     int sockfd = *(int*)arg;
@@ -335,11 +342,12 @@ void* receive_play_audio(void* arg) {
 #endif
 		}
     }
-    // Return 
+    // Return
     return NULL;
     
 }
 
+// Thread for capturing and sending
 void* capture_send_audio(void* arg) {
 	
 	// Get the socket fd
@@ -488,14 +496,17 @@ int client(int argc, char *argv[]) {
 		// Loop de loop
 		while (running) {
 			
-
+			// Input var
+			char ch;
+			// Read in byte from stdin
+			int n = read(STDIN_FILENO, &ch, 1);
+			if (n > 0 && ch == 'q') {
+				running = 0;
+			}
 			
 			// If capture handle was initialized
 			if(capture) {
-				// Input var
-				char ch;
-				// Read in byte from stdin
-				int n = read(STDIN_FILENO, &ch, 1);
+
 				// Has spacebar been pressed?
 				if (n > 0 && ch == ' ') {
 					//Enable / disable the mic
@@ -698,7 +709,7 @@ int server(int argc, char *argv[]) {
 
 // Print the usage legend
 static void print_usage(int argc, char *argv[]) {
-	printf("\n    \033[1;36mUltros \033[1;35mMaximus\n    \033[1;36mhttps://gitub.com/redhate\033[0m\n");
+	printf("\n    \033[1;36mUltros \033[1;35mMaximus\n    \033[1;33mhttps://gitub.com/redhate\033[0m\n");
 	printf("\nUsage:\n    Server:\n        %s [listener_port] [capture device] [playback device]\n\n    Client:\n        %s [server_ip] [port] [capture device] [playback device]\n\n    Example:\n        Server:\n            %s 1122 default default\n\n        Client:\n            %s 127.0.0.1 1122 default default\n\n", argv[0], argv[0], argv[0], argv[0]);
 }
 
@@ -813,4 +824,3 @@ int main(int argc, char *argv[]) {
     return 0;
     
 }
-
