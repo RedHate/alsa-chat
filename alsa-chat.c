@@ -31,22 +31,18 @@
  
  */
 
+// Uncomment to enable debugging // comment to turn off
+#define _DEBUG_ 1
+
 // Headers
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
 #include <alloca.h>
-#include <time.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <sys/select.h>
-#include <pthread.h>
-#include <alsa/asoundlib.h>
-#include <fcntl.h>
-#include <math.h>
 #include <termios.h>
 #include <time.h>
+#include <arpa/inet.h>
+#include <sys/select.h>
+#include <netinet/tcp.h>
+#include <pthread.h>
+#include <alsa/asoundlib.h>
 
 // Alsa related definitions
 #define SAMPLE_RATE 4000
@@ -55,11 +51,13 @@
 #define FORMAT      SND_PCM_FORMAT_S8
 #define TYPE		char
 
+int running = 1;
 
 // Microphone time out
 #define MIC_TIMEOUT_SECONDS 60
 int key_up = 0;
 time_t key_up_start;
+float mic_gain = 1.0f;
 
 // Global ALSA handles
 snd_pcm_t *capture_handle;
@@ -91,7 +89,7 @@ void print_keys() {
 		// Loop through key length
 		for (j = 0; j < XOR_KEY_LEN; j++) {
 			// print the bytes
-			printf("0x%02hX, ", keys[i][j]);
+			printf("0x%02hX, ", (unsigned char)keys[i][j]);
 		}
 		// print a new line for each key
 		printf("\n");
@@ -131,7 +129,7 @@ void xor_keys(uint8_t keys[KEY_ARRAY][XOR_KEY_LEN], const char *password){
 }
 
 // Directional XOR fnc (doesn't need to be global, even if that's how you think it should be done. i scope my code.)
-void xor_directional(uint8_t *buffer, uint32_t size, uint8_t *key, int direction) {
+void xor_directional(uint8_t *buffer, size_t size, uint8_t *key, int direction) {
 	// Used for xor position
 	int keypos = 0;
 	// XOR forward / backward
@@ -161,8 +159,8 @@ void xor_directional(uint8_t *buffer, uint32_t size, uint8_t *key, int direction
 	}
 }
 
-// Should suffice with a random key
-void xor4x(uint8_t *buffer, uint32_t size) {
+// This adds a reversable layer of noise to our signal
+void xor4x(uint8_t *buffer, size_t size) {
 	// Set the direction to 0
 	int direction = 0;
 	// loop through keys
@@ -191,6 +189,24 @@ void xor4x(uint8_t *buffer, uint32_t size) {
 	}
 }
 
+// This adds a lot of noise to our signal. good. also reversable.
+void byte_swap(uint8_t *in, uint32_t size){
+	
+	// set up a temporary buffer
+	uint8_t t_buf[size];
+	
+	int i;
+	for(i=0; i<size; i+=2){
+		t_buf[i+0] = in[i+1];
+		t_buf[i+1] = in[i+0];;
+	}
+	
+	// put to original buffer
+	for(i = 0; i < size; i++){
+		in[i] = t_buf[i];
+	}
+}
+
 // This may give an implicit declatation warning, but it seems to be functional try 1000000 as param
 void sleep_us(long microseconds){
 	// Local var
@@ -216,17 +232,6 @@ void enable_nonblocking_input() {
     fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK);
 }
 
-// Check if spacebar is pressed
-int spacebar_pressed() {
-	// Local var
-    char ch;
-    // Read in byte from stdin
-    int n = read(STDIN_FILENO, &ch, 1);
-    // If it's space return 1
-    if (n > 0 && ch == ' ') return 1;
-    // Otherwise return 0
-    return 0;
-}
 
 // Initialize ALSA for capture or playback
 int init_alsa(snd_pcm_t **handle, const char *device, snd_pcm_stream_t stream, uint32_t channels) {
@@ -301,16 +306,33 @@ void* receive_play_audio(void* arg) {
     // Create a buffer for audio
     TYPE buffer[FRAME_SIZE*CHANNELS];
     // Receive some data
-    while (1) {
+    while (running) {
 		// Read into buffer from socket
 		ssize_t r = recv(sockfd, buffer, sizeof(buffer), 0);
 		if (r > 0){
+			// Swap neighbouring bytes
+			byte_swap((uint8_t*)buffer, sizeof(buffer));
 			// Apply XOR
 			xor4x((uint8_t*)buffer, sizeof(buffer));
+			// 8 bit hi-low cutoff
+			/*
+			int c;
+			for(c=0;c<sizeof(buffer);c++){
+				if((((uint8_t)buffer[c] <= 0xFF) && ((uint8_t)buffer[c] >= 0xFC)) || 
+				   (((uint8_t)buffer[c] <= 0x04) && ((uint8_t)buffer[c] >= 0x00))) buffer[c] = 0x00;
+			}
+			*/
 			// Write buffer to playback handle
 			snd_pcm_writei(playback_handle, buffer, r);
+#ifdef _DEBUG_
 			// Debug
-			printf("Recv) %ld\n", sizeof(buffer));
+			printf("\033[1;36mRecv) %ld\033[0m ", r);
+			int c;
+			for(c=0;c<sizeof(buffer);c++){
+				printf("%02hX,", (unsigned char)buffer[c]);
+			}
+			printf("\n");
+#endif
 		}
     }
     // Return 
@@ -326,7 +348,7 @@ void* capture_send_audio(void* arg) {
     TYPE buffer[FRAME_SIZE*CHANNELS];
     
     // Send some data
-    while (1) {
+    while (running) {
 		// This needs to stay reading
 		// Read in buffer from capture handle
 		ssize_t r = snd_pcm_readi(capture_handle, buffer, sizeof(buffer));
@@ -334,16 +356,30 @@ void* capture_send_audio(void* arg) {
 			// Is the mic on?
 			if(key_up == 1){
 				if((time(NULL)-key_up_start) < MIC_TIMEOUT_SECONDS){
+					int c;
+					// Adjust mic gain before modulation
+					for (c = 0; c < sizeof(buffer); c++) {
+						buffer[c] = (TYPE)(buffer[c] * mic_gain);
+					}
+#ifdef _DEBUG_
+					// Debug
+					printf("\033[1;35mSend) %ld\033[0m ", r);
+					for(c=0;c<sizeof(buffer);c++){
+						printf("%02hX,",  (unsigned char)buffer[c]);
+					}
+					printf("\n");
+#endif
 					// Apply XOR
 					xor4x((uint8_t*)buffer, sizeof(buffer));
+					// Swap neighbouring bytes
+					byte_swap((uint8_t*)buffer, sizeof(buffer));
 					// Send to sock
 					r = send(sockfd, buffer, sizeof(buffer),0);
-					// Debug
-					printf("Send) %ld\n", r);
+					
 				}
 				else{
 					key_up = 0;
-					printf("mic off\n");
+					printf("\033[1;31m[Mic off]\033[0m\n");
 				}
 			}
 		}
@@ -387,28 +423,30 @@ int client(int argc, char *argv[]) {
 	// Bandwidth usage per-second
 	int bw = (int)(SAMPLE_RATE*CHANNELS*FRAME_SIZE*sizeof(TYPE));
 	printf("Bandwidth: %d bytes %d kb (per second)\r\n", bw, bw/1024);
-        
-    // Local vars
-    int sockfd;
-	struct sockaddr_in addr;
-    	
-	// Set up a sock for client communication 
-	sockfd = socket(AF_INET, SOCK_STREAM, 0);
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons(atoi(argv[2]));
+    
+	// Server info
+    char *server_ip = argv[1];
+    int port = atoi(argv[2]);
+
+	// Create socket
+	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        perror("Socket failed");
+        return 1;
+    }
+
+	// Set address family and port
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, server_ip, &addr.sin_addr);
 	
-	// Convert to numeric addressing
-	inet_pton(AF_INET, argv[1], &addr.sin_addr);
-	
-	// Print some info
-	printf("Connecting to server.\n");
-	
-	// Attempt to connect to client socket and print some info
-	if(!connect(sockfd, (struct sockaddr*)&addr, sizeof(addr)) == 0){
-		printf("Connection failed.\n");
-		return 0;
-	}
-	
+    // Connect to server
+    if (!connect(sockfd, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+        perror("Connection failed");
+        return 1;
+    }
+    
 	// Debug
 	printf("Connected!\n");
 	
@@ -424,6 +462,9 @@ int client(int argc, char *argv[]) {
 	
 	// Select the socket
 	select(sockfd, &readfds, NULL, NULL, &tv);
+
+	int flag = 1;
+	setsockopt(sockfd, IPPROTO_TCP,TCP_NODELAY,(char*)&flag,sizeof(int));
 
     // If client sock has been assigned
     if(sockfd >= 0) {
@@ -445,13 +486,18 @@ int client(int argc, char *argv[]) {
 		}
 		
 		// Loop de loop
-		while (1) {
+		while (running) {
+			
+
 			
 			// If capture handle was initialized
 			if(capture) {
-				
+				// Input var
+				char ch;
+				// Read in byte from stdin
+				int n = read(STDIN_FILENO, &ch, 1);
 				// Has spacebar been pressed?
-				if (spacebar_pressed()) {
+				if (n > 0 && ch == ' ') {
 					//Enable / disable the mic
 					if(!key_up){
 						// Mic on!
@@ -459,25 +505,26 @@ int client(int argc, char *argv[]) {
 						// Start the timer
 						key_up_start = time(NULL);
 						// Debug
-						printf("mic on\n");
+						printf("\033[1;32m[Mic on]\033[0m\n");
 					} 
 					else {
 						// Mic off!
 						key_up = 0;
 						// Debug
-						printf("mic off\n");
+						printf("\033[1;31m[Mic off]\033[0m\n");
 					}
 					
-				} 
-				else {
-					// Microsecond sleep
-					sleep_us(1000);
 				}
-			} 
-			else {
-				// Microsecond sleep
-				sleep_us(1000);
+				else if (n > 0 && ch == ',') {
+					mic_gain -= 0.1f;
+				}
+				else if (n > 0 && ch == '.') {
+					mic_gain += 0.1f;
+				}
 			}
+			
+			// Microsecond sleep
+			sleep_us(1000);
 		}
 		
 	}
@@ -593,6 +640,9 @@ int server(int argc, char *argv[]) {
 					tv.tv_usec = 0;
 					select(i, &readfds, NULL, NULL, &tv);
 
+					int flag = 1;
+					setsockopt(i, IPPROTO_TCP,TCP_NODELAY,(char*)&flag,sizeof(int));
+
                     // Input buffer
                     TYPE buffer[FRAME_SIZE*CHANNELS];
                     
@@ -601,7 +651,13 @@ int server(int argc, char *argv[]) {
                     if (nbytes > 0){
 						
 						// Debug
-						// printf("recv) %d\n", nbytes);
+						printf("\033[1;36mRecv) %d\033[0m ", nbytes);
+						int c;
+						for(c=0;c<sizeof(buffer);c++){
+							printf("%02hX,", (unsigned char)buffer[c]);
+						}
+						printf("\n");
+
 						
 						// we cannot sum streams because of the e2e stream masking (if this were crypto it would not be e2e)
 						// having people all talking at once over one another could be really damn annoying too...
@@ -614,7 +670,13 @@ int server(int argc, char *argv[]) {
 								// Send the buffer to socket
                                 send(j, buffer, sizeof(buffer), 0);
                                 // Debug
-                                // printf("send) %d\n", sizeof(buffer));
+                                printf("\033[1;35mSend) %ld\033[0m ", sizeof(buffer));
+								int c;
+								for(c=0;c<sizeof(buffer);c++){
+									printf("%02hX,", (unsigned char)buffer[c]);
+								}
+								printf("\n");
+
                             }
                         }
                     } 
@@ -636,6 +698,7 @@ int server(int argc, char *argv[]) {
 
 // Print the usage legend
 static void print_usage(int argc, char *argv[]) {
+	printf("\n    \033[1;36mUltros \033[1;35mMaximus\n    \033[1;36mhttps://gitub.com/redhate\033[0m\n");
 	printf("\nUsage:\n    Server:\n        %s [listener_port] [capture device] [playback device]\n\n    Client:\n        %s [server_ip] [port] [capture device] [playback device]\n\n    Example:\n        Server:\n            %s 1122 default default\n\n        Client:\n            %s 127.0.0.1 1122 default default\n\n", argv[0], argv[0], argv[0], argv[0]);
 }
 
@@ -720,7 +783,7 @@ static void device_list(snd_pcm_stream_t stream) {
 // Program main
 int main(int argc, char *argv[]) {
     
-    // Print help
+    // Print help with -h
 	if (argc == 2) {
 		if (strcmp(argv[1], "-h") == 0) {
 			print_usage(argc, argv);
@@ -743,7 +806,6 @@ int main(int argc, char *argv[]) {
     }
     // Print usage
     else {
-		printf("\n    \033[1;36mUltros \033[1;35mMaximus\n    \033[0;33mhttps://gitub.com/redhate\033[0m\n");
         print_usage(argc, argv);
         return 1;
     }
