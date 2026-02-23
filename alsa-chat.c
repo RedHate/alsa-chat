@@ -496,17 +496,12 @@ int client(int argc, char *argv[]) {
 		// Loop de loop
 		while (running) {
 			
-			// Input var
-			char ch;
-			// Read in byte from stdin
-			int n = read(STDIN_FILENO, &ch, 1);
-			if (n > 0 && ch == 'q') {
-				running = 0;
-			}
-			
 			// If capture handle was initialized
 			if(capture) {
-
+				// Input var
+				char ch;
+				// Read in byte from stdin
+				int n = read(STDIN_FILENO, &ch, 1);
 				// Has spacebar been pressed?
 				if (n > 0 && ch == ' ') {
 					//Enable / disable the mic
