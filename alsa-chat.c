@@ -59,6 +59,7 @@ float mic_gain = 1.0f;
 
 // Var for shutdown
 int running = 1;
+int debug = 0;
 
 // Global ALSA handles
 snd_pcm_t *capture_handle;
@@ -104,7 +105,7 @@ void xor_keys(uint8_t keys[KEY_ARRAY][XOR_KEY_LEN], const char *password){
 	// Loop through the keys
 	int i, j;
 	// positive
-	for (i = 0; i < KEY_ARRAY-1; i++) {
+	for (i = 0; i < KEY_ARRAY; i++) {
 		// Loop through selected key
 		for (j = 0; j < XOR_KEY_LEN; j++) {
 			// XOR the key
@@ -116,7 +117,7 @@ void xor_keys(uint8_t keys[KEY_ARRAY][XOR_KEY_LEN], const char *password){
 		}
 	}
 	// negative
-	for (i = KEY_ARRAY-1; i > 0; i--) {
+	for (i = KEY_ARRAY; i > 0; i--) {
 		// Loop through selected key
 		for (j = 0; j < XOR_KEY_LEN; j++) {
 			// XOR the key
@@ -191,21 +192,81 @@ void xor4x(uint8_t *buffer, size_t size) {
 }
 
 // This adds a lot of noise to our signal. good. also reversable.
-void byte_swap(uint8_t *in, uint32_t size){
+void byte_swap(uint8_t *in, uint32_t size, int enc){
 	
 	// set up a temporary buffer
 	uint8_t t_buf[size];
-	
-	int i;
-	for(i=0; i<size; i+=2){
-		t_buf[i+0] = in[i+1];
-		t_buf[i+1] = in[i+0];;
+	// swap bytes side by side
+	int i, j;
+	if(enc){
+		
+		//blast the buffer 9 times
+		for(j=0; j<4; j++){
+			for(i=0; i<size; i+=4){
+				t_buf[i+0] = in[i+2];
+				t_buf[i+1] = in[i+3];
+				t_buf[i+2] = in[i+1];
+				t_buf[i+3] = in[i+0];
+			}
+			
+			// put to original buffer
+			for(i = 0; i < size; i++){
+				in[i] = t_buf[i];
+			}
+			
+			for(i=0; i<size; i+=8){
+				t_buf[i+0] = in[i+0];
+				t_buf[i+1] = in[i+4];
+				t_buf[i+2] = in[i+1];
+				t_buf[i+3] = in[i+5];
+				t_buf[i+4] = in[i+2];
+				t_buf[i+5] = in[i+6];
+				t_buf[i+6] = in[i+3];
+				t_buf[i+7] = in[i+7];
+			}
+			
+			// put to original buffer
+			for(i = 0; i < size; i++){
+				in[i] = t_buf[i];
+			}
+		}
 	}
-	
-	// put to original buffer
-	for(i = 0; i < size; i++){
-		in[i] = t_buf[i];
+	else{
+		//blast the buffer 9 times
+		for(j=0; j<4; j++){
+			
+			for(i=0; i<size; i+=8){
+				t_buf[i+0] = in[i+0];
+				t_buf[i+4] = in[i+1];
+				t_buf[i+1] = in[i+2];
+				t_buf[i+5] = in[i+3];
+				t_buf[i+2] = in[i+4];
+				t_buf[i+6] = in[i+5];
+				t_buf[i+3] = in[i+6];
+				t_buf[i+7] = in[i+7];
+			}
+
+			// put to original buffer
+			for(i = 0; i < size; i++){
+				in[i] = t_buf[i];
+			}
+			
+			for(i=0; i<size; i+=4){
+				t_buf[i+2] = in[i+0];
+				t_buf[i+3] = in[i+1];
+				t_buf[i+1] = in[i+2];
+				t_buf[i+0] = in[i+3];
+			}
+
+			// put to original buffer
+			for(i = 0; i < size; i++){
+				in[i] = t_buf[i];
+			}
+
+
+		}	
 	}
+
 }
 
 // This may give an implicit declatation warning, but it seems to be functional try 1000000 as param
@@ -222,6 +283,7 @@ void sleep_us(long microseconds) {
 // Local Var
 struct termios term;
 
+// Restore original terminal properties
 void restore_terminal(void) {
 	tcsetattr(STDIN_FILENO,TCSANOW,&term);
 }
@@ -306,6 +368,65 @@ int init_alsa(snd_pcm_t **handle, const char *device, snd_pcm_stream_t stream, u
     
 }
 
+#ifdef _DEBUG_
+
+void audio_visualiser(char *buffer, size_t size){
+		
+	/*
+	 * This is honestly one of the coolest things I have ever made
+	 * such a simple thing and looks so neat
+	 */
+			
+	char visualiser_array[16][16]={
+		"-",
+		"--",
+		"---",
+		"----",
+		"-----",
+		"------",
+		"-------",
+		"--------",
+		"---------",
+		"----------",
+		"-----------",
+		"------------",
+		"-------------",
+		"--------------",
+		"---------------",
+		"----------------",
+	};
+	
+	char color_strings[8][10]={
+		"\033[1;37m",//WHITE
+		"\033[1;34m",//BLUE
+		"\033[1;36m",//CYAN
+		"\033[1;32m",//GREEN
+		"\033[1;33m",//YELLOW
+		"\033[1;31m",//RED
+		"\033[1;35m",//MAGENTA
+		"\033[1;37m",//WHITE1
+		//"\033[0m", //NOCOLOR
+	};
+	
+	int c;
+	for(c=0;c<sizeof(buffer);c++){
+		if(((char)buffer[c] > 0) && ((char)buffer[c] < 127)){
+			// Are we in range?
+			if(buffer[c]/8 <= 8)
+				// yes i do realise i could have done this differently but i wanted my own order to the colors.
+				printf("%s                 [%3d] %s\033[0m\n", color_strings[((char)(buffer[c]/8))/2],  buffer[c], visualiser_array[(char)(buffer[c]/8)]);
+		}
+		if (((char)buffer[c] < 0) && ((char)buffer[c] > -127)){
+			// Are we in range?
+			if(~buffer[c]/8 <= 8)
+				// yes i do realise i could have done this differently but i wanted my own order to the colors.
+				printf("%s%16s [%3d]\033[0m\n", color_strings[((char)(~buffer[c]/6))/2], visualiser_array[(char)(~buffer[c]/8)], buffer[c]);
+		}
+	}
+			
+}
+#endif
+
 // Thread for receiving audio and playing
 void* receive_play_audio(void* arg) {
 	// Get the socket fd
@@ -318,27 +439,24 @@ void* receive_play_audio(void* arg) {
 		ssize_t r = recv(sockfd, buffer, sizeof(buffer), 0);
 		if (r > 0){
 			// Swap neighbouring bytes
-			byte_swap((uint8_t*)buffer, sizeof(buffer));
+			byte_swap((uint8_t*)buffer, sizeof(buffer), 0);
 			// Apply XOR
 			xor4x((uint8_t*)buffer, sizeof(buffer));
-			// 8 bit hi-low cutoff
-			/*
-			int c;
-			for(c=0;c<sizeof(buffer);c++){
-				if((((uint8_t)buffer[c] <= 0xFF) && ((uint8_t)buffer[c] >= 0xFC)) || 
-				   (((uint8_t)buffer[c] <= 0x04) && ((uint8_t)buffer[c] >= 0x00))) buffer[c] = 0x00;
-			}
-			*/
 			// Write buffer to playback handle
 			snd_pcm_writei(playback_handle, buffer, r);
 #ifdef _DEBUG_
 			// Debug
-			printf("\033[1;36mRecv) %ld\033[0m ", r);
-			int c;
-			for(c=0;c<sizeof(buffer);c++){
-				printf("%02hX,", (unsigned char)buffer[c]);
+			if(debug == 1){
+				printf("\033[1;36mRecv) %ld\033[0m ", r);
+				int c;
+				for(c=0;c<sizeof(buffer);c++){
+					printf("%02hX,", (unsigned char)buffer[c]);
+				}
+				printf("\n");
 			}
-			printf("\n");
+			else if(debug == 2){
+				audio_visualiser(buffer, sizeof(buffer));
+			}	
 #endif
 		}
     }
@@ -371,16 +489,21 @@ void* capture_send_audio(void* arg) {
 					}
 #ifdef _DEBUG_
 					// Debug
-					printf("\033[1;35mSend) %ld\033[0m ", r);
-					for(c=0;c<sizeof(buffer);c++){
-						printf("%02hX,",  (unsigned char)buffer[c]);
+					if(debug == 1){
+						printf("\033[1;35mSend) %ld\033[0m ", r);
+						for(c=0;c<sizeof(buffer);c++){
+							printf("%02hX,",  (unsigned char)buffer[c]);
+						}
+						printf("\n");
 					}
-					printf("\n");
+					else if(debug == 2){
+						audio_visualiser(buffer, sizeof(buffer));
+					}
 #endif
 					// Apply XOR
 					xor4x((uint8_t*)buffer, sizeof(buffer));
 					// Swap neighbouring bytes
-					byte_swap((uint8_t*)buffer, sizeof(buffer));
+					byte_swap((uint8_t*)buffer, sizeof(buffer), 1);
 					// Send to sock
 					r = send(sockfd, buffer, sizeof(buffer),0);
 					
@@ -429,7 +552,7 @@ int client(int argc, char *argv[]) {
     enable_nonblocking_input();
     
 	// Bandwidth usage per-second
-	int bw = (int)(SAMPLE_RATE*CHANNELS*FRAME_SIZE*sizeof(TYPE));
+	int bw = (int)(SAMPLE_RATE*FRAME_SIZE*CHANNELS*sizeof(TYPE));
 	printf("Bandwidth: %d bytes %d kb (per second)\r\n", bw, bw/1024);
     
 	// Server info
@@ -496,12 +619,21 @@ int client(int argc, char *argv[]) {
 		// Loop de loop
 		while (running) {
 			
+			// Input var
+			char ch;
+			// Read in byte from stdin
+			int n = read(STDIN_FILENO, &ch, 1);
+#ifdef _DEBUG_
+			if (n > 0 && ch == 'd') {
+				// Swap debug display modes
+				debug ++;
+				// If its greater than 2, reset
+				if(debug > 2)
+					debug = 0;
+			}
+#endif
 			// If capture handle was initialized
 			if(capture) {
-				// Input var
-				char ch;
-				// Read in byte from stdin
-				int n = read(STDIN_FILENO, &ch, 1);
 				// Has spacebar been pressed?
 				if (n > 0 && ch == ' ') {
 					//Enable / disable the mic
@@ -528,11 +660,9 @@ int client(int argc, char *argv[]) {
 					mic_gain += 0.1f;
 				}
 			}
-			
 			// Microsecond sleep
 			sleep_us(1000);
 		}
-		
 	}
 	
 	// Close sockets
