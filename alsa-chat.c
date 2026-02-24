@@ -49,7 +49,6 @@
 #define CHANNELS    1
 #define FRAME_SIZE  8
 #define FORMAT      SND_PCM_FORMAT_S8
-#define TYPE		char
 
 // Microphone time out
 #define MIC_TIMEOUT_SECONDS 60
@@ -432,7 +431,7 @@ void* receive_play_audio(void* arg) {
 	// Get the socket fd
     int sockfd = *(int*)arg;
     // Create a buffer for audio
-    TYPE buffer[FRAME_SIZE*CHANNELS];
+    char buffer[FRAME_SIZE*CHANNELS];
     // Receive some data
     while (running) {
 		// Read into buffer from socket
@@ -471,7 +470,7 @@ void* capture_send_audio(void* arg) {
 	// Get the socket fd
     int sockfd = *(int*)arg;
     // Create a buffer for audio
-    TYPE buffer[FRAME_SIZE*CHANNELS];
+    char buffer[FRAME_SIZE*CHANNELS];
     
     // Send some data
     while (running) {
@@ -485,7 +484,7 @@ void* capture_send_audio(void* arg) {
 					int c;
 					// Adjust mic gain before modulation
 					for (c = 0; c < sizeof(buffer); c++) {
-						buffer[c] = (TYPE)(buffer[c] * mic_gain);
+						buffer[c] = (char)(buffer[c] * mic_gain);
 					}
 #ifdef _DEBUG_
 					// Debug
@@ -552,7 +551,7 @@ int client(int argc, char *argv[]) {
     enable_nonblocking_input();
     
 	// Bandwidth usage per-second
-	int bw = (int)(SAMPLE_RATE*FRAME_SIZE*CHANNELS*sizeof(TYPE));
+	int bw = (int)(SAMPLE_RATE*FRAME_SIZE*CHANNELS*sizeof(char));
 	printf("Bandwidth: %d bytes %d kb (per second)\r\n", bw, bw/1024);
     
 	// Server info
@@ -780,7 +779,7 @@ int server(int argc, char *argv[]) {
 					setsockopt(i, IPPROTO_TCP,TCP_NODELAY,(char*)&flag,sizeof(int));
 
                     // Input buffer
-                    TYPE buffer[FRAME_SIZE*CHANNELS];
+                    char buffer[FRAME_SIZE*CHANNELS];
                     
                     // Receive the buffer from the current socket
                     int nbytes = recv(i, buffer, sizeof(buffer), 0);
