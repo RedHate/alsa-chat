@@ -55,6 +55,7 @@
 #include "achat-cdefs.h"
 #include "achat-debug.h"
 #include "achat-xor.h"
+
 // Var for shutdown
 int running = 1;
 
@@ -95,7 +96,7 @@ int init_alsa(snd_pcm_t **handle, const char *device, snd_pcm_stream_t stream, u
     // Init a handle for the PCM steam from a chosen device
     if ((err = snd_pcm_open(handle, device, stream, 0)) < 0) {
         fprintf(stderr, "ALSA open error: %s\n", snd_strerror(err));
-        return err;
+        return 1;
     }
 	
 	// I assume this allocates memory for params, return doesn't allow error checking
@@ -104,7 +105,7 @@ int init_alsa(snd_pcm_t **handle, const char *device, snd_pcm_stream_t stream, u
 	// Init all channel params and error check
     if ((err = snd_pcm_hw_params_any(*handle, params)) < 0) {
         fprintf(stderr, "ALSA snd_pcm_hw_params_any error: %s\n", snd_strerror(err));
-		return err;
+		return 2;
 	}
 	
 	// (ignore that gcc throws warning on this or fix it lol)
@@ -112,17 +113,17 @@ int init_alsa(snd_pcm_t **handle, const char *device, snd_pcm_stream_t stream, u
 	uint32_t resample = 1;
     if ((err = snd_pcm_hw_params_set_rate_resample(*handle, params, *(unsigned int*)&resample)) < 0) {
         //fprintf(stderr, "ALSA snd_pcm_hw_params_set_rate_resample error: %s\n", snd_strerror(err));
-		return err;
+		return 3;
 	}
 	// Set access
     if ((err = snd_pcm_hw_params_set_access(*handle, params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) {
         fprintf(stderr, "ALSA snd_pcm_hw_params_set_access error: %s\n", snd_strerror(err));
-		return err;
+		return 4;
 	}
 	// Set format
     if ((err = snd_pcm_hw_params_set_format(*handle, params, FORMAT)) < 0) {
         fprintf(stderr, "ALSA snd_pcm_hw_params_set_format error: %s\n", snd_strerror(err));
-		return err;
+		return 5;
 	}
 	
 	// Set channels
@@ -132,17 +133,17 @@ int init_alsa(snd_pcm_t **handle, const char *device, snd_pcm_stream_t stream, u
 	uint32_t sample_rate = SAMPLE_RATE;
     if ((err = snd_pcm_hw_params_set_rate_near(*handle, params, &sample_rate, 0)) < 0) {
         fprintf(stderr, "ALSA snd_pcm_hw_params_set_rate error: %s\n", snd_strerror(err));
-		return err;
+		return 6;
 	}
 	// Set hw params
     if ((err = snd_pcm_hw_params(*handle, params)) < 0) {
         fprintf(stderr, "ALSA snd_pcm_hw_params error: %s\n", snd_strerror(err));
-		return err;
+		return 7;
 	}
 	// Prepare for pcm
     if ((err = snd_pcm_prepare(*handle)) < 0) {
         fprintf(stderr, "ALSA snd_pcm_prepare error: %s\n", snd_strerror(err));
-		return err;
+		return 8;
 	}
 
     printf("ALSA initialized at %u Hz for %d\n", sample_rate, stream);
@@ -273,12 +274,16 @@ int client(int argc, char *argv[]) {
 	// If capture handle was initialized
 	if(capture) {
 		// Set capture device to selected capture device
-		init_alsa(&capture_handle, argv[3], SND_PCM_STREAM_CAPTURE, CHANNELS);
+		if(init_alsa(&capture_handle, argv[3], SND_PCM_STREAM_CAPTURE, CHANNELS) != 0){
+			return 0;
+		}
 	}
 	// If playback handle was initialized
 	if(play) {
 		// Set capture device to selected playback device
-		init_alsa(&playback_handle, argv[4], SND_PCM_STREAM_PLAYBACK, CHANNELS);
+		if(init_alsa(&playback_handle, argv[4], SND_PCM_STREAM_PLAYBACK, CHANNELS) != 0){
+			return 0;
+		}
 	}
     
     // Init opus encoder and decoder handles
