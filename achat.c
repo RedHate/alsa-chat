@@ -6,8 +6,8 @@
  * An organically grown way of how not to create voice chat.
  * 
  * Uses libopus!
- * 
- * c99 compliant
+ *
+ * c99 should still work.
  * 
  * **NOTE**
  * 
@@ -693,5 +693,6 @@ int main(int argc, char *argv[]) {
     return 0;
     
 }
+
 
 
