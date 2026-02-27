@@ -49,7 +49,7 @@
 #include <pthread.h>
 #include <alsa/asoundlib.h>
 #include <opus/opus.h>
-
+// Project headers
 #include "achat-termios.h"
 #include "achat-opus.h"
 #include "achat-cdefs.h"
@@ -57,17 +57,16 @@
 #include "achat-xor.h"
 
 // Var for shutdown
-int running = 1;
+int running = 1;        // control var
 
 // For visualizer
-int debug = 0;
-int color_mode = 0;
+int debug      = 0;     // toggle with 'd' button
+int color_mode = 0;     // toggle color mode of the visualizer with 'c' key
 
-// Microphone time out
-
-float mic_gain = 1.0f;
-int key_up = 0;
-time_t key_up_start;
+// Microphone
+float mic_gain = 1.0f;  // controlled with ',' and '.' keys
+time_t key_up_start;    // used to count time for mic timeout
+int   key_up   = 0;     // toggle with spacebar
 
 // This may give an implicit declatation warning, but it seems to be functional try 1000000 as param
 void sleep_us(long microseconds) {
