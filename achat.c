@@ -1,7 +1,7 @@
 /*
  * 
  * vchat
- * [8-Bit alsa voice chat]
+ * [16-Bit alsa / libopus voice chat]
  * 
  * An organically grown way of how not to create voice chat.
  * 
@@ -22,7 +22,8 @@
  * 
  * Use plug devices! 
  * 			
- * 		Like so: plug:hw:1 rather than hw:1
+ * 		plug:hw:1 rather than hw:1
+ * 		NULL for no device
  * 
  * 
  *                               -Ultros was here in 2026
@@ -692,4 +693,5 @@ int main(int argc, char *argv[]) {
     return 0;
     
 }
+
 
